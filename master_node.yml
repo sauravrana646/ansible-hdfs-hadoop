@@ -73,25 +73,12 @@
     register : fresh_format
     when : check_format.stat.exists == false
 
-  # - debug : 
-  #     var : fresh_format.failed
 
   # - name : Install pip                                                  # FOR AWS 
   #   package :                
   #     name : python-pip
   #     state : present
 
-  # - name : Install pexpect module for ansible
-  #   pip : 
-  #     name : pexpect
-  #     state : present
-
-  # - name : Reformatting empty namenode
-  #   expect :
-  #     command : "hadoop namenode -format"
-  #     responses : 
-  #       (Y or N) : "Y"
-  #   when : check_format.stat.exists == false and fresh_format.rc == 1
 
   - name: Check if Namenode is running
     tags: namenode
