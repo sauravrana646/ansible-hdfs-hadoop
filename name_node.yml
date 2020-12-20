@@ -1,0 +1,91 @@
+- hosts  : localhost
+  gather_facts : no
+  debugger: on_failed
+  # become : yes
+  vars : 
+    datanode_directory : /data_node_dir
+    namenode_IP : 192.168.43.195
+    namenode_port : 9001
+  tasks :
+  - name : Upload Hadoop RPM
+    copy : 
+      src : /root/hadoop_download
+      dest : /root/
+  - name : Install Java for Hadoop
+    yum :
+      name : /root/hadoop_download/jdk-8u171-linux-x64.rpm
+      state : present
+    register : java
+
+  - name : Install Hadoop
+    command : "rpm -i /root/hadoop_download/hadoop-1.2.1-1.x86_64.rpm --force"
+    when : java.changed == true
+  
+  - name : Configuring Core Site
+    blockinfile : 
+      path : /etc/hadoop/core-site.xml
+      insertafter : <configuration>
+      marker: "<!-- {mark} ANSIBLE ADDED BLOCK -->"
+      block : "<property>\n<name>fs.default.name</name>\n<value>hdfs://{{namenode_IP}}:{{namenode_port}}</value>\n</property>"
+    notify : 
+      - stop_datanode
+      - restart_datanode
+
+  - name : Creating DataNode Directory
+    file : 
+      path : "{{datanode_directory}}"
+      state : directory
+
+  - name : Configuring HDFS Site
+    blockinfile : 
+      path : /etc/hadoop/hdfs-site.xml
+      insertafter : <configuration>
+      marker: "<!-- {mark} ANSIBLE ADDED BLOCK -->"
+      block : "<property>\n<name>dfs.data.dir</name>\n<value>{{datanode_directory}}</value>\n</property>"
+    notify : 
+      - stop_datanode
+      - restart_datanode
+
+  - name : Allow Relevant Ports in Firewall
+    firewalld : 
+      port : "{{item}}/tcp"
+      zone : public
+      permanent : true
+      immediate : true
+      state : enabled
+    loop : 
+      - 50010
+      - 50020
+      - 50075
+
+  - name : Add masquerade to public zone
+    firewalld : 
+      masquerade : yes
+      zone : public
+      permanent : true
+      immediate : true
+      state : enabled
+
+  - name: Check if Datanode is running
+    tags: datanode
+    shell: jps | grep " DataNode" | grep -v grep
+    ignore_errors: yes
+    changed_when: false
+    register: service_datanode_status
+
+  - name: Start Datanode
+    tags: dtatnode
+    command: hadoop-daemon.sh start datanode
+    when: service_datanode_status.rc == 1
+
+
+# Make handler so that if conf files are changed datanode is stopped and then restarted
+  handlers :
+    - name : stop_datanode 
+      command : hadoop-daemon.sh stop datanode
+      changed_when : false
+      when : service_datanode_status.rc == 0
+
+    - name : restart_datanode
+      command : hadoop-daemon.sh start datanode
+      when : service_datanode_status.rc == 0

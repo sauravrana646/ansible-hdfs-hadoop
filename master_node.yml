@@ -1,0 +1,106 @@
+- hosts  : hadoophost
+  gather_facts : no
+  debugger: on_failed
+  # become : yes                                           # FOR AWS
+  vars : 
+    namenode_directory : /name_node
+    namenode_port : 9001
+  tasks :
+  - name : Upload Hadoop RPM
+    copy : 
+      src : /root/hadoop_download
+      dest : /root/
+  - name : Install Java for Hadoop
+    yum :
+      name : /root/hadoop_download/jdk-8u171-linux-x64.rpm
+      state : present
+    register : java
+
+  - name : Install Hadoop
+    command : "rpm -i /root/hadoop_download/hadoop-1.2.1-1.x86_64.rpm --force"
+    when : java.changed == true
+  
+  - name : Configuring Core Site
+    blockinfile : 
+      path : /etc/hadoop/core-site.xml
+      insertafter : <configuration>
+      marker: "<!-- {mark} ANSIBLE ADDED BLOCK -->"
+      block : "<property>\n<name>fs.default.name</name>\n<value>hdfs://0.0.0.0:{{namenode_port}}</value>\n</property>"
+
+  - name : Creating NameNode Directory
+    file : 
+      path : "{{namenode_directory}}"
+      state : directory
+
+  - name : Configuring HDFS Site
+    blockinfile : 
+      path : /etc/hadoop/hdfs-site.xml
+      insertafter : <configuration>
+      marker: "<!-- {mark} ANSIBLE ADDED BLOCK -->"
+      block : "<property>\n<name>dfs.name.dir</name>\n<value>{{namenode_directory}}</value>\n</property>"
+
+  - name : Allow Relevant Ports in Firewall
+    firewalld : 
+      port : "{{item}}/tcp"
+      zone : public
+      permanent : true
+      immediate : true
+      state : enabled
+    loop : 
+      - "{{namenode_port}}"
+      - 50070
+
+  - name : Add masquerade to public zone
+    firewalld : 
+      masquerade : yes
+      zone : public
+      permanent : true
+      immediate : true
+      state : enabled
+
+  - name : Checking if NameNode is already formatted
+    stat :
+      path : "{{namenode_directory}}/current/VERSION"
+    register : 
+      check_format
+
+  - debug :
+      var : check_format.stat.exists
+
+  - name : Format NameNode
+    command : "hadoop namenode -format -force"
+    ignore_errors: yes
+    register : fresh_format
+    when : check_format.stat.exists == false
+
+  # - debug : 
+  #     var : fresh_format.failed
+
+  # - name : Install pip                                                  # FOR AWS 
+  #   package :                
+  #     name : python-pip
+  #     state : present
+
+  # - name : Install pexpect module for ansible
+  #   pip : 
+  #     name : pexpect
+  #     state : present
+
+  # - name : Reformatting empty namenode
+  #   expect :
+  #     command : "hadoop namenode -format"
+  #     responses : 
+  #       (Y or N) : "Y"
+  #   when : check_format.stat.exists == false and fresh_format.rc == 1
+
+  - name: Check if Namenode is running
+    tags: namenode
+    shell: jps | grep " NameNode" | grep -v grep
+    ignore_errors: yes
+    changed_when: false
+    register: service_namenode_status
+
+  - name: Start Namenode
+    tags: namenode
+    command: hadoop-daemon.sh start namenode
+    when: service_namenode_status.rc == 1
